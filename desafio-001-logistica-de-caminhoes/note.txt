@@ -1,0 +1,16 @@
+Crie um sistema de logistica de entregas conforme a capacidade dos caminhões.
+
+Capture as seguintes informações:
+- Área do produto
+- Peso do produto
+- Cidade de destino do produto
+
+Sendo que cada caminhão tem sua área limite e seu peso limite, determine quantos produtos
+e quais ficaram em cada caminhão conforme suas capacidade e caminhões disponíveis. Assim também, 
+determine para onde cada caminhão irá viajar e quantos produtos e quais, não serão transportados 
+naquela remesssa.
+
+Regras:
+- O caminhão deve viajar para onde tem a maior quantidade de produtos da mesma cidade.
+- Apenas algumas cidades estão disponíveis para envio
+- Um caminhão só pode ir para uma cidade
