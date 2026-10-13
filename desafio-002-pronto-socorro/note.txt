@@ -1,0 +1,42 @@
+Crie um sistema de triagem e atendimento de um pronto-socorro, simulando um plantão de 12 horas
+(das 07:00 às 19:00), minuto a minuto.
+
+Capture as seguintes informações:
+- Paciente: nome, horário de chegada, classificação de risco e especialidade necessária
+- Médico: nome, especialidades que atende e horário do turno (início e fim)
+
+Classificação de risco (Protocolo de Manchester):
+- VERMELHO (emergência)     -> tempo máximo de espera: 0 min   | duração do atendimento: 60 min
+- LARANJA  (muito urgente)  -> tempo máximo de espera: 10 min  | duração do atendimento: 40 min
+- AMARELO  (urgente)        -> tempo máximo de espera: 60 min  | duração do atendimento: 30 min
+- VERDE    (pouco urgente)  -> tempo máximo de espera: 120 min | duração do atendimento: 20 min
+- AZUL     (não urgente)    -> tempo máximo de espera: 240 min | duração do atendimento: 10 min
+
+Especialidades: CLINICO_GERAL, PEDIATRIA, ORTOPEDIA, CARDIOLOGIA
+
+Determine, para cada paciente, qual médico o atendeu, o horário de início e fim do atendimento e
+quanto tempo ele esperou. Determine também quais pacientes não foram atendidos até o fim do
+plantão e, por classificação de risco, o tempo médio de espera e quantos pacientes estouraram
+o tempo máximo de espera.
+
+Regras:
+- Um médico atende apenas um paciente por vez e só atende especialidades que domina.
+- Um médico só inicia um atendimento dentro do seu turno, mas sempre termina o atendimento que
+  já começou, mesmo que passe do fim do turno.
+- Quando um médico fica livre, ele chama o paciente de maior prioridade que ele pode atender.
+  Em caso de empate na prioridade, chama quem chegou primeiro.
+- Todo paciente pode ser atendido por um CLINICO_GERAL, mas, se houver um especialista livre
+  naquele minuto, o especialista tem preferência.
+- Pacientes VERMELHOS não esperam: se nenhum médico compatível estiver livre, o médico compatível
+  que estiver atendendo um paciente VERDE ou AZUL interrompe esse atendimento. O paciente
+  interrompido volta para a fila (com sua prioridade original e horário de chegada original) e,
+  quando for chamado de novo, precisa apenas do tempo que faltava do atendimento.
+- Reclassificação: se um paciente esperar mais que o dobro do tempo máximo da sua cor, ele sobe
+  uma cor (ex: VERDE -> AMARELO). Isso pode acontecer mais de uma vez. VERMELHO não sobe.
+- Pacientes AZUIS que esperarem mais de 300 min desistem e vão embora (registre como "desistiu").
+
+Desafio extra (opcional):
+- Leia os pacientes e médicos de um arquivo CSV em vez de deixá-los fixos no código.
+- Escreva testes (cargo test) para as regras de interrupção e de reclassificação.
+- Mostre uma "linha do tempo" de cada médico, ex:
+  Dra. Ana | 07:00-07:30 João (AMARELO) | 07:30-07:42 livre | 07:42-08:42 Maria (VERMELHO) ...

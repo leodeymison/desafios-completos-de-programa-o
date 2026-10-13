@@ -1,16 +1,28 @@
-Crie um sistema de logistica de entregas conforme a capacidade dos caminhões.
+Desafio 001 - Logística de caminhões
 
-Capture as seguintes informações:
-- Área do produto
-- Peso do produto
-- Cidade de destino do produto
+Crie um sistema que distribua produtos entre os caminhões disponíveis, respeitando a
+capacidade de cada caminhão, e informe o que foi enviado e o que ficou para a próxima remessa.
 
-Sendo que cada caminhão tem sua área limite e seu peso limite, determine quantos produtos
-e quais ficaram em cada caminhão conforme suas capacidade e caminhões disponíveis. Assim também, 
-determine para onde cada caminhão irá viajar e quantos produtos e quais, não serão transportados 
-naquela remesssa.
+Entradas:
+- Caminhões: nome, área máxima (m²) e peso máximo (kg).
+- Produtos: nome, área (m²), peso (kg) e cidade de destino.
+- Cidades atendidas (lista fixa): Palmas, Araguaína, São Paulo e Rio de Janeiro.
 
 Regras:
-- O caminhão deve viajar para onde tem a maior quantidade de produtos da mesma cidade.
-- Apenas algumas cidades estão disponíveis para envio
-- Um caminhão só pode ir para uma cidade
+- Cada caminhão viaja para uma única cidade e só leva produtos dessa cidade.
+- Os caminhões são processados em ordem. Cada um vai para a cidade que, naquele momento,
+  tem mais produtos pendentes (conta a quantidade de produtos, não o peso nem a área).
+- Depois de carregar um caminhão, os produtos embarcados saem da lista de pendentes e a
+  escolha da cidade é refeita para o próximo caminhão. Assim, mais de um caminhão pode ir
+  para a mesma cidade.
+- Para levar o maior número possível de produtos, o carregamento começa pelos menores:
+  ordena por área e, em caso de empate, por peso.
+- Um produto só entra se a soma de área e a soma de peso continuarem abaixo dos limites
+  do caminhão. Se não couber, é deixado de fora e o próximo produto é testado.
+
+Saída esperada:
+1. Resumo inicial: quantidade, área total e peso total dos produtos e dos caminhões.
+2. Enviados: para cada caminhão, a cidade de destino, a quantidade de produtos, a área e o
+   peso totais carregados e a lista dos produtos (nome, área e peso).
+3. Não enviados: para cada cidade, os produtos que ficaram para a próxima remessa, ou
+   "Nenhum produto" quando todos foram enviados.
