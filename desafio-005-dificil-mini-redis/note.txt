@@ -1,0 +1,116 @@
+Desafio 005 - Mini Redis (banco chave-valor em rede)
+
+Crie um servidor de banco de dados chave-valor em memória, inspirado no Redis, que aceita
+vários clientes ao mesmo tempo pela rede (TCP). Os clientes se conectam com o netcat e enviam
+um comando por linha:
+
+    cargo run -- --porta 6380
+    nc localhost 6380
+
+Áreas do Rust que você vai praticar:
+- Programação assíncrona com tokio (async/await, tokio::spawn, TcpListener, select!)
+- Estado compartilhado entre tarefas: Arc, Mutex/RwLock (e por que não segurar um lock
+  através de um .await)
+- Canais: tokio::sync::broadcast (pub/sub) e mpsc
+- Enums com dados e pattern matching para representar comandos e respostas
+- Parsing de texto e tratamento de erros com tipos próprios
+- Serialização com serde (snapshot em JSON)
+- Tempo e expiração: Instant, Duration, tarefas em segundo plano
+- Desligamento gracioso (Ctrl+C) com tokio::signal
+
+Protocolo:
+- Cada comando é uma linha. Os argumentos são separados por espaços. Para usar espaços dentro
+  de um valor, coloque-o entre aspas: SET frase "olá mundo".
+- Nomes de comandos não diferenciam maiúsculas de minúsculas (set = SET).
+- Formato das respostas:
+      OK                       -> sucesso sem valor
+      "valor"                  -> texto
+      (integer) 3              -> número
+      (nil)                    -> chave não existe
+      1) "a"  2) "b"           -> listas (um item por linha)
+      (error) mensagem         -> erro (a conexão continua aberta)
+
+Comandos:
+- PING                         -> PONG
+- SET chave valor [EX segundos]-> grava (EX define a expiração)
+- GET chave                    -> valor ou (nil)
+- DEL chave [chave ...]        -> (integer) quantidade removida
+- EXISTS chave                 -> (integer) 1 ou 0
+- INCR chave / DECR chave      -> soma/subtrai 1. Chave inexistente vale 0.
+                                  Erro se o valor não for um número inteiro.
+- KEYS padrão                  -> chaves que casam com o padrão (* = qualquer sequência,
+                                  ? = um caractere). Implemente o casamento você mesmo.
+- EXPIRE chave segundos        -> (integer) 1 se a chave existe, 0 se não
+- TTL chave                    -> segundos restantes, -1 se não expira, -2 se não existe
+- LPUSH / RPUSH chave v [v...] -> insere no início/fim de uma lista, retorna o tamanho
+- LPOP / RPOP chave            -> remove e retorna do início/fim
+- LRANGE chave inicio fim      -> itens do intervalo (índices negativos contam do fim:
+                                  -1 é o último)
+- PUBLISH canal mensagem       -> (integer) quantos clientes receberam
+- SUBSCRIBE canal              -> a conexão passa a receber as mensagens do canal
+- SAVE                         -> grava o snapshot em disco
+- QUIT                         -> encerra a conexão
+
+Regras:
+- Cada chave guarda um tipo: texto ou lista. Usar um comando de lista numa chave de texto
+  (ou o contrário) retorna:
+      (error) WRONGTYPE operação em chave com o tipo errado
+- Comando desconhecido ou com argumentos faltando retorna erro, sem derrubar o servidor.
+- Expiração em dois níveis:
+  1. Preguiçosa: ao acessar uma chave expirada, ela é removida e tratada como inexistente.
+  2. Ativa: uma tarefa em segundo plano, a cada 1 segundo, remove as chaves expiradas.
+- SET sobre uma chave existente remove a expiração antiga (a não ser que tenha EX).
+- Persistência: SAVE e o desligamento por Ctrl+C gravam todas as chaves em dump.json
+  (guarde a expiração como horário absoluto). Ao iniciar, se dump.json existir, carregue-o
+  e descarte o que já expirou.
+- Um cliente lento ou que desconecta não pode travar os outros.
+- Logue no terminal do servidor cada conexão e desconexão com o endereço do cliente.
+
+Exemplo de sessão:
+
+    PING
+    PONG
+    SET nome "Ferris"
+    OK
+    GET nome
+    "Ferris"
+    INCR visitas
+    (integer) 1
+    INCR nome
+    (error) o valor não é um número inteiro
+    RPUSH fila a b c
+    (integer) 3
+    LRANGE fila 0 -1
+    1) "a"
+    2) "b"
+    3) "c"
+    GET fila
+    (error) WRONGTYPE operação em chave com o tipo errado
+    SET sessao abc EX 2
+    OK
+    TTL sessao
+    (integer) 2
+    (após 3 segundos)
+    GET sessao
+    (nil)
+    KEYS *i*
+    1) "visitas"
+    TTL nome
+    (integer) -1
+
+Pub/Sub (dois terminais):
+
+    terminal 1: SUBSCRIBE noticias
+                inscrito em noticias
+    terminal 2: PUBLISH noticias "Rust 2.0 lançado"
+                (integer) 1
+    terminal 1: [noticias] Rust 2.0 lançado
+
+Desafio extra (opcional):
+- Implemente o protocolo RESP de verdade, para que o redis-cli oficial consiga se conectar.
+- Crie um segundo binário (src/bin/benchmark.rs) que abre 50 conexões simultâneas, envia
+  10.000 comandos cada e mostra comandos por segundo. Compare Mutex com RwLock e com o mapa
+  dividido em 16 partes (sharding), cada uma com seu próprio lock.
+- AOF: em vez de snapshot, grave em um arquivo cada comando de escrita e, ao iniciar,
+  reexecute o arquivo para reconstruir o estado.
+- Testes de integração (tests/) que sobem o servidor numa porta aleatória e conversam com ele.

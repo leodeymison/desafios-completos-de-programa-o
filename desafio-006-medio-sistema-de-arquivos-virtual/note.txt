@@ -1,0 +1,117 @@
+Desafio 006 - Sistema de arquivos virtual
+
+Crie um shell interativo que simula um sistema de arquivos inteiramente em memória, com
+diretórios, arquivos, caminhos relativos e absolutos, e links. O prompt mostra o diretório
+atual:
+
+    cargo run
+    / $ mkdir docs
+
+Áreas do Rust que você vai praticar:
+- Estruturas em árvore com smart pointers: Rc, Weak e RefCell (filho conhece o pai sem
+  criar ciclo de referência)
+- Contagem de referências na prática: Rc::strong_count, Rc::ptr_eq
+- Traits e trait objects: cada comando é um Box<dyn Comando> registrado num HashMap
+- Implementar Iterator para uma struct própria (percurso da árvore)
+- Implementar Display e Ord, e ordenar coleções
+- Manipulação de strings e de caminhos (sem usar std::path, que é do disco de verdade)
+- Leitura do terminal (stdin) em loop, tratamento de erros e testes unitários
+
+Estrutura sugerida:
+
+    enum Conteudo { Arquivo(Vec<u8>), Diretorio(BTreeMap<String, Rc<RefCell<No>>>) }
+    struct No { nome: String, pai: Weak<RefCell<No>>, conteudo: Conteudo, modificado: u64 }
+
+    trait Comando {
+        fn nome(&self) -> &'static str;
+        fn ajuda(&self) -> &'static str;
+        fn executar(&self, fs: &mut SistemaDeArquivos, args: &[String]) -> Result<String, ErroFs>;
+    }
+
+Caminhos:
+- Absolutos começam com "/" (/docs/rust). Relativos partem do diretório atual (rust/notas.txt).
+- "." é o diretório atual e ".." é o pai. O pai da raiz é a própria raiz.
+- Barras repetidas e no final são ignoradas: /docs//rust/ = /docs/rust.
+- Nomes não podem conter "/" nem ser vazios, "." ou "..".
+
+Comandos:
+- pwd                          -> mostra o caminho absoluto atual
+- cd [caminho]                 -> muda de diretório (sem argumento, vai para /)
+- ls [-l] [caminho]            -> lista em ordem alfabética, diretórios com "/" no final.
+                                  -l mostra tipo, quantidade de links, tamanho e nome.
+- mkdir [-p] caminho           -> cria diretório (-p cria os intermediários e não dá erro se
+                                  já existir)
+- touch arquivo                -> cria arquivo vazio (ou só atualiza a data de modificação)
+- write arquivo "texto"        -> sobrescreve o conteúdo (cria se não existir)
+- append arquivo "texto"       -> adiciona ao final
+- cat arquivo                  -> mostra o conteúdo
+- rm [-r] caminho              -> remove (diretório não vazio só com -r)
+- mv origem destino            -> move/renomeia
+- cp [-r] origem destino       -> copia (cópia independente: alterar uma não muda a outra)
+- ln origem destino            -> link físico: os dois nomes apontam para o MESMO arquivo
+- find [caminho] padrão        -> busca por nome (* e ? como coringas)
+- tree [caminho]               -> desenha a árvore
+- du [caminho]                 -> tamanho total em bytes
+- help                         -> lista os comandos com a ajuda de cada um (gerada a partir
+                                  da trait, não escrita à mão)
+- exit                         -> sai
+
+Regras:
+- Erros mostram uma mensagem e o shell continua:
+      erro: '/docs/x' não existe
+      erro: 'notas.txt' não é um diretório
+      erro: 'docs' não está vazio (use rm -r)
+- Não é possível mover um diretório para dentro dele mesmo (mv /a /a/b) nem remover a raiz.
+- Se o destino de mv/cp for um diretório existente, o item vai para dentro dele com o mesmo
+  nome.
+- rm de um diretório que contém o diretório atual leva o shell para o diretório existente
+  mais próximo acima.
+- Link físico: só para arquivos. Um arquivo só deixa de existir quando o último nome que
+  aponta para ele é removido. ls -l mostra quantos nomes apontam para cada arquivo
+  (use Rc::strong_count).
+- du conta cada arquivo apenas uma vez, mesmo que ele tenha vários links dentro do caminho
+  (use Rc::ptr_eq ou o endereço do Rc num HashSet).
+- Não pode haver vazamento de memória: o pai é Weak. Escreva um teste que remove um diretório
+  e verifica, com um Weak guardado antes, que o nó foi liberado (upgrade() retorna None).
+- O percurso usado por find, tree e du deve ser um iterador próprio (struct Percurso que
+  implementa Iterator<Item = (String, Rc<RefCell<No>>)>), em profundidade e em ordem
+  alfabética.
+
+Exemplo de sessão:
+
+    / $ mkdir -p docs/rust
+    / $ cd docs/rust
+    /docs/rust $ write notas.txt "ownership e borrowing"
+    /docs/rust $ cd ../..
+    / $ ln /docs/rust/notas.txt atalho.txt
+    / $ append atalho.txt " e lifetimes"
+    / $ cat docs/rust/notas.txt
+    ownership e borrowing e lifetimes
+    / $ ls -l
+    a  2  33 B  atalho.txt
+    d  -   -    docs/
+    / $ tree
+    /
+    ├── atalho.txt (33 B)
+    └── docs/
+        └── rust/
+            └── notas.txt (33 B)
+    / $ du /
+    33 B
+    / $ rm docs/rust/notas.txt
+    / $ cat atalho.txt
+    ownership e borrowing e lifetimes
+    / $ rm docs
+    erro: 'docs' não está vazio (use rm -r)
+    / $ find / *.txt
+    /atalho.txt
+
+Desafio extra (opcional):
+- Pipes e redirecionamento: ls | grep rust, cat a.txt > b.txt, echo "oi" >> log.txt.
+- Undo: o comando undo desfaz a última operação que alterou o sistema de arquivos
+  (pense em como guardar o estado anterior: padrão Command com desfazer, ou snapshots).
+- Links simbólicos (ln -s): apontam para um caminho, podem ficar "quebrados" e o cd precisa
+  detectar ciclos.
+- Persistência: save arquivo.json / load arquivo.json com serde, preservando os links
+  físicos (dois nomes, um arquivo só, depois de carregar).
+- Torne o tipo do conteúdo genérico (No<T>) e use a mesma árvore para outro propósito.

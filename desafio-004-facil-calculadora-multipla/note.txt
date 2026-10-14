@@ -1,0 +1,168 @@
+Desafio 004 - Calculadora múltipla
+
+Crie uma biblioteca de calculadoras, cada uma em seu próprio módulo, com funções puras: elas
+recebem os dados, devolvem um resultado (Result<T, Erro>) e NÃO leem do teclado nem imprimem
+nada. Ainda não haverá interface: o main.rs apenas chama cada calculadora com os exemplos
+deste enunciado e imprime os resultados. A ideia é que, num desafio futuro, uma interface
+(menu no terminal, web, ...) possa usar essas mesmas funções sem nenhuma alteração.
+
+Valores com casas decimais são mostrados com 2 casas, arredondando (22.857 -> 22.86).
+Entradas inválidas devem retornar um erro com uma mensagem clara, nunca causar panic.
+
+--------------------------------------------------------------------------------------------
+1. IMC (Índice de Massa Corporal)
+--------------------------------------------------------------------------------------------
+Entrada: peso (kg) e altura (m). Fórmula: IMC = peso / altura².
+
+    IMC < 18.5         -> Abaixo do peso
+    18.5 <= IMC < 25   -> Peso normal
+    25   <= IMC < 30   -> Sobrepeso
+    30   <= IMC < 35   -> Obesidade grau I
+    35   <= IMC < 40   -> Obesidade grau II
+    IMC >= 40          -> Obesidade grau III
+
+Erro se peso ou altura forem menores ou iguais a zero.
+
+    imc(70, 1.75)  -> 22.86 (Peso normal)
+
+--------------------------------------------------------------------------------------------
+2. Números primos
+--------------------------------------------------------------------------------------------
+- Verificar se um número é primo (0 e 1 não são primos). Teste divisores só até a raiz
+  quadrada do número.
+- Listar todos os primos até N usando o Crivo de Eratóstenes.
+- Fatorar um número (>= 2) em fatores primos.
+
+    eh_primo(97)        -> true
+    eh_primo(91)        -> false (7 x 13)
+    primos_ate(30)      -> 2 3 5 7 11 13 17 19 23 29
+    fatorar(360)        -> 2^3 x 3^2 x 5
+
+--------------------------------------------------------------------------------------------
+3. MDC e MMC
+--------------------------------------------------------------------------------------------
+MDC pelo algoritmo de Euclides. MMC calculado a partir do MDC: mmc(a, b) = a / mdc(a, b) * b.
+Devem aceitar uma lista com dois ou mais números. Erro se algum número for zero.
+
+    mdc(48, 18)         -> 6
+    mmc(48, 18)         -> 144
+    mmc(4, 6, 10)       -> 60
+
+--------------------------------------------------------------------------------------------
+4. Conversor de temperatura
+--------------------------------------------------------------------------------------------
+Converte entre Celsius, Fahrenheit e Kelvin (qualquer escala para qualquer escala).
+Erro se a temperatura estiver abaixo do zero absoluto (0 K = -273.15 °C = -459.67 °F).
+
+    100 °C  -> 212.00 °F | 373.15 K
+    -40 °F  -> -40.00 °C | 233.15 K
+    -300 °C -> erro: temperatura abaixo do zero absoluto
+
+--------------------------------------------------------------------------------------------
+5. Juros simples e compostos
+--------------------------------------------------------------------------------------------
+Entrada: capital inicial, taxa mensal (%) e quantidade de meses.
+Saída: montante final e total de juros.
+
+    Simples:   montante = capital x (1 + taxa x meses)
+    Compostos: montante = capital x (1 + taxa)^meses
+
+    capital 1000, taxa 1%, 12 meses
+        simples   -> montante 1120.00 | juros 120.00
+        compostos -> montante 1126.83 | juros 126.83
+
+Extra da calculadora: gerar a tabela mês a mês dos juros compostos (mês, juros do mês,
+montante acumulado).
+
+--------------------------------------------------------------------------------------------
+6. Equação do 2º grau (Bhaskara)
+--------------------------------------------------------------------------------------------
+Entrada: a, b, c de ax² + bx + c = 0. Saída: delta e as raízes.
+- delta > 0: duas raízes reais diferentes.
+- delta = 0: uma raiz real (dupla).
+- delta < 0: duas raízes complexas, no formato "real ± imaginária i".
+- a = 0: não é do 2º grau; resolva como equação do 1º grau (bx + c = 0). Se b também for 0,
+  retorne erro.
+
+    (1, -5, 6)   -> delta 1   | x1 = 3.00, x2 = 2.00
+    (1, -4, 4)   -> delta 0   | x = 2.00
+    (1, 2, 5)    -> delta -16 | x = -1.00 ± 2.00i
+    (0, 2, -8)   -> equação do 1º grau | x = 4.00
+
+--------------------------------------------------------------------------------------------
+7. Conversor de bases numéricas
+--------------------------------------------------------------------------------------------
+Converte um número inteiro não negativo de qualquer base entre 2 e 16 para qualquer outra.
+Implemente a conversão manualmente (sem usar format!("{:b}") ou from_str_radix).
+Letras de A a F, aceitando maiúsculas e minúsculas na entrada. Erro se a base for inválida ou
+se o número tiver um dígito que não existe na base de origem.
+
+    255 (base 10)    -> binário 11111111 | octal 377 | hexadecimal FF
+    "1010" (base 2)  -> 10 (base 10)
+    "ff" (base 16)   -> 11111111 (base 2)
+    "129" (base 8)   -> erro: dígito '9' inválido na base 8
+
+--------------------------------------------------------------------------------------------
+8. Números romanos
+--------------------------------------------------------------------------------------------
+Converte de inteiro para romano e de romano para inteiro, no intervalo de 1 a 3999.
+Na conversão de romano para inteiro, rejeite números mal formados (ex: IIII, VV, IC, MMMM).
+
+    1994       -> MCMXCIV
+    3999       -> MMMCMXCIX
+    "MMXXVI"   -> 2026
+    "IC"       -> erro: número romano inválido
+    0 ou 4000  -> erro: fora do intervalo (1 a 3999)
+
+--------------------------------------------------------------------------------------------
+9. Calculadora de idade
+--------------------------------------------------------------------------------------------
+Entrada: data de nascimento e data de referência (dd/mm/aaaa).
+Saída: idade exata em anos, meses e dias, total de dias vividos e o dia da semana em que a
+pessoa nasceu. Não use bibliotecas de data (como chrono): implemente as regras de ano
+bissexto, quantidade de dias de cada mês e o cálculo do dia da semana.
+Erro se a data for inválida (ex: 31/04/2020, 29/02/2023) ou se o nascimento for depois da
+data de referência.
+
+    nascimento 15/03/1990, referência 14/10/2026
+        -> 36 anos, 6 meses e 29 dias | nasceu numa quinta-feira
+
+Ano bissexto: divisível por 4, exceto os divisíveis por 100 que não são divisíveis por 400
+(2000 é bissexto, 1900 não é).
+
+--------------------------------------------------------------------------------------------
+10. Validador de CPF
+--------------------------------------------------------------------------------------------
+Aceita o CPF com ou sem pontuação ("529.982.247-25" ou "52998224725").
+Regras:
+- Precisa ter exatamente 11 dígitos depois de remover "." e "-".
+- CPFs com todos os dígitos iguais (111.111.111-11, ...) são inválidos.
+- 1º dígito verificador: multiplique os 9 primeiros dígitos por 10, 9, 8, ..., 2 e some.
+  resto = soma % 11. Se resto < 2, o dígito é 0; senão, é 11 - resto.
+- 2º dígito verificador: mesma conta com os 10 primeiros dígitos (incluindo o 1º verificador),
+  multiplicando por 11, 10, 9, ..., 2.
+
+    "529.982.247-25"  -> válido
+    "529.982.247-26"  -> inválido (dígito verificador incorreto)
+    "111.111.111-11"  -> inválido (todos os dígitos iguais)
+    "1234"            -> inválido (deve ter 11 dígitos)
+
+Também gere um CPF válido aleatório formatado (XXX.XXX.XXX-XX).
+
+--------------------------------------------------------------------------------------------
+Regras gerais
+--------------------------------------------------------------------------------------------
+- Cada calculadora fica em um módulo separado (src/imc.rs, src/primos.rs, ...).
+- Crie um tipo de erro próprio (enum) com uma variante por tipo de problema e implemente
+  Display para ele, em vez de retornar String.
+- Escreva testes (cargo test) para cada calculadora, usando os exemplos deste enunciado e
+  pelo menos um caso de erro por calculadora.
+- O main.rs deve executar todos os exemplos acima e imprimir os resultados agrupados por
+  calculadora.
+
+Desafio extra (opcional):
+- Histórico: guarde cada cálculo feito (calculadora, entrada e resultado) e mostre os últimos
+  N no final da execução.
+- Primos até 10.000.000 em menos de 1 segundo (compile com --release e meça o tempo).
+- Adicione mais uma calculadora à sua escolha (ex: média de notas com situação do aluno,
+  divisão de conta com gorjeta, consumo de combustível) seguindo o mesmo padrão.

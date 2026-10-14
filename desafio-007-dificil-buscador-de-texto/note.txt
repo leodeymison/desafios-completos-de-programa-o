@@ -1,0 +1,103 @@
+Desafio 007 - Buscador de texto (mini motor de busca)
+
+Crie um motor de busca de linha de comando: ele indexa todos os arquivos de texto de uma
+pasta, em paralelo, salva o índice em disco e depois responde buscas ordenando os documentos
+por relevância, mostrando o trecho onde o termo aparece.
+
+    cargo run --release -- indexar ./livros -o indice.bin --threads 8
+    cargo run --release -- buscar indice.bin "capitu olhos"
+
+Sugestão de dados: baixe uns 50 livros em português do Projeto Gutenberg
+(https://www.gutenberg.org) em formato .txt.
+
+Áreas do Rust que você vai praticar:
+- Concorrência com threads do sistema: std::thread::scope, mpsc, Arc<Mutex<T>> e a
+  alternativa de cada thread montar seu próprio índice e depois juntar (merge)
+- Lifetimes: um tokenizador que devolve fatias (&str) do texto original sem copiar
+  (fn tokens<'a>(texto: &'a str) -> impl Iterator<Item = Token<'a>>)
+- Iteradores e closures: map, filter, flat_map, fold, peekable, iteradores próprios
+- Generics e traits: trait Ranqueador com duas implementações (TF-IDF e BM25)
+- Unicode: diferença entre bytes e chars, remoção de acentos, minúsculas
+- Coleções: HashMap, HashSet, BinaryHeap (top-K), BTreeMap
+- CLI com subcomandos usando a crate clap (derive)
+- Serialização binária com serde + bincode
+- Medição de desempenho: Instant, --release, e (extra) benchmarks com criterion
+- Módulos e organização: lib.rs com a lógica e main.rs só com a CLI
+
+Crates permitidas: clap, serde, bincode, unicode-normalization, criterion (extra).
+Nada de crates de busca prontas (tantivy, etc.) nem rayon (no desafio principal).
+
+Etapa 1 - Tokenização:
+- Quebre o texto em palavras (sequências de letras e números).
+- Normalize: minúsculas e sem acentos ("Coração" -> "coracao").
+- Ignore stopwords (carregue uma lista de stopwords.txt: a, o, de, que, e, do, da, ...).
+- Guarde a posição (índice da palavra) e a linha de cada token.
+
+Etapa 2 - Indexação (comando indexar):
+- Percorra a pasta recursivamente e pegue os arquivos .txt.
+- Distribua os arquivos entre N threads (--threads, padrão = número de núcleos, use
+  std::thread::available_parallelism).
+- Monte um índice invertido: para cada termo, a lista de documentos onde ele aparece, com as
+  posições (índice posicional, necessário para busca por frase).
+- Guarde também, por documento: caminho, total de termos e o texto (ou o offset das linhas,
+  para montar os trechos).
+- Arquivos que não forem UTF-8 válido devem ser pulados com um aviso, sem parar a indexação.
+- Ao final mostre: documentos indexados, termos distintos, tempo total e tamanho do índice.
+
+    Indexados 50 documentos (12.4 MB) em 0.84 s com 8 threads
+    214.337 termos distintos | índice: 31.2 MB
+
+Etapa 3 - Busca (comando buscar):
+Sintaxe da consulta:
+    capitu olhos          -> documentos com TODOS os termos (AND)
+    capitu OR bentinho    -> documentos com QUALQUER um dos termos
+    capitu -escobar       -> com capitu e SEM escobar
+    "olhos de ressaca"    -> frase exata (termos em posições consecutivas, desconsiderando
+                             as stopwords removidas)
+Os operadores podem ser combinados: "olhos de ressaca" capitu -escobar
+
+Ranqueamento (implemente os dois e escolha com --ranking tfidf|bm25, padrão bm25):
+
+    TF-IDF:  tf(t, d)  = ocorrências de t em d / total de termos de d
+             idf(t)    = ln(N / df(t))           N = total de documentos
+                                                 df = documentos que contêm t
+             score(d)  = soma de tf(t, d) * idf(t) para cada termo da consulta
+
+    BM25:    idf(t)    = ln(1 + (N - df + 0.5) / (df + 0.5))
+             score(d)  = soma de idf(t) * (f * (k1 + 1)) / (f + k1 * (1 - b + b * |d| / media))
+                         f = ocorrências de t em d, |d| = total de termos de d,
+                         media = média de termos por documento, k1 = 1.2, b = 0.75
+
+- Mostre os 10 melhores (--top N). Use um BinaryHeap de tamanho N para não ordenar tudo.
+- Para cada resultado mostre a posição, o score, o caminho e até 2 trechos com o número da
+  linha e o termo destacado entre [colchetes].
+- Mostre quantos documentos casaram e o tempo da busca.
+
+Exemplo de saída:
+
+    buscar indice.bin "olhos de ressaca"
+
+    3 documentos encontrados em 0.4 ms
+
+    1. (8.21) livros/dom_casmurro.txt
+       linha 1873: ...Olhos de cigana obliqua e dissimulada. [Olhos de ressaca]? Vá, de...
+       linha 1902: ...traziam não sei que fluido misterioso e enérgico, os [olhos de ressaca]...
+    2. (2.37) livros/memorias_postumas.txt
+       linha 412: ...
+
+Regras:
+- O trecho deve mostrar o texto original (com acentos e maiúsculas), não o normalizado.
+  Cuidado ao cortar o trecho: cortar uma String no meio de um caractere acentuado causa panic.
+- O tokenizador não pode alocar uma String por palavra durante a leitura: use &str apontando
+  para o texto original e só crie a String do termo normalizado quando ele entrar no índice.
+- O resultado da indexação deve ser o mesmo com 1 ou N threads (escreva um teste para isso).
+- Mostre, com uma tabela no README ou no terminal, o tempo de indexação com 1, 2, 4 e 8
+  threads.
+
+Desafio extra (opcional):
+- Busca tolerante a erros: se um termo não existir no índice, sugira o termo mais parecido
+  usando distância de Levenshtein ("Você quis dizer: capitu?").
+- Modo interativo: carregue o índice uma vez e aceite várias consultas seguidas.
+- Indexação incremental: ao reindexar, processe apenas os arquivos novos ou modificados.
+- Refaça a indexação com rayon e compare o código e o desempenho com a versão manual.
+- Benchmarks com criterion para o tokenizador e para a busca.

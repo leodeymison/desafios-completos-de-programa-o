@@ -1,0 +1,6 @@
+[package]
+name = "desafio-007-dificil-buscador-de-texto"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]

@@ -1,0 +1,127 @@
+Desafio 003 - Mini linguagem de programação
+
+Crie um interpretador para uma pequena linguagem de programação chamada "Mini". O programa
+recebe o caminho de um arquivo .mini, lê o código-fonte e o executa, mostrando na tela o que
+o programa Mini imprimir.
+
+    cargo run -- exemplos/programa.mini
+
+O interpretador deve ser dividido em três etapas, cada uma em seu próprio módulo:
+1. Lexer (análise léxica): transforma o texto em uma lista de tokens, guardando a linha e a
+   coluna onde cada token começa.
+2. Parser (análise sintática): transforma os tokens em uma árvore sintática (AST).
+3. Interpretador: percorre a AST e executa o programa.
+
+Tipos de valores:
+- Inteiro (i64): 0, 42, 1000
+- Texto: "olá, mundo" (aceita os escapes \n, \t, \" e \\)
+- Booleano: true, false
+- nil: valor de uma função que termina sem return
+
+Elementos da linguagem:
+- Comentários de linha: // até o fim da linha
+- Declaração de variável: let x = 10;
+- Atribuição: x = x + 1;
+- Impressão: print(a, b, c);  -> imprime os valores separados por espaço e pula uma linha
+- Condicional: if cond { ... } else if cond { ... } else { ... }
+- Repetição:   while cond { ... }
+- Funções:     fn nome(a, b) { ... return a + b; }
+- Chamada:     nome(1, 2)
+
+Operadores, da MENOR para a MAIOR precedência:
+- or
+- and
+- ==  !=
+- <  <=  >  >=
+- +  -
+- *  /  %
+- not  -  (unários: negação lógica e sinal negativo)
+- chamada de função e parênteses
+
+Regras:
+- Operadores binários de mesma precedência são associativos à esquerda: 10 - 3 - 2 = 5.
+- / é divisão inteira e trunca em direção a zero: 7 / 2 = 3, -7 / 2 = -3.
+- + entre dois textos concatena. Qualquer outra mistura de tipos em operações aritméticas ou
+  comparações (<, >, ...) é erro de tipo. == e != aceitam quaisquer tipos (tipos diferentes
+  nunca são iguais).
+- and e or fazem curto-circuito: em "false and f()", f nunca é chamada.
+- Condições de if e while precisam ser booleanas. "if 1 { }" é erro de tipo (não existe
+  "truthy" em Mini).
+- Cada bloco { } cria um novo escopo. Uma variável só existe dentro do bloco onde foi declarada
+  e nos blocos internos. Declarar duas vezes a mesma variável no mesmo escopo é erro, mas um
+  bloco interno pode declarar uma variável com o mesmo nome de uma externa (sombreamento).
+- Atribuir a uma variável que não foi declarada com let é erro.
+- Funções só podem ser declaradas no nível principal do arquivo (não dentro de outras funções
+  ou blocos) e podem ser chamadas antes da linha em que foram declaradas.
+- Dentro de uma função só são visíveis os parâmetros, as variáveis locais e as variáveis
+  globais. Funções podem ser recursivas.
+- Chamar uma função com a quantidade errada de argumentos é erro.
+- Se a profundidade de chamadas passar de 1000, o programa para com erro de "estouro de pilha".
+- return fora de uma função é erro de sintaxe.
+
+Erros:
+Todo erro interrompe a execução e é mostrado com o tipo, a linha e a coluna onde ocorreu.
+Tipos de erro: léxico, sintaxe e execução.
+
+    Erro léxico [linha 3, coluna 9]: caractere inesperado '@'
+    Erro léxico [linha 5, coluna 7]: texto não fechado
+    Erro de sintaxe [linha 1, coluna 5]: esperado identificador, encontrado '='
+    Erro de execução [linha 2, coluna 11]: variável 'y' não foi declarada
+    Erro de execução [linha 8, coluna 14]: divisão por zero
+    Erro de execução [linha 4, coluna 7]: não é possível somar inteiro com texto
+
+Exemplo de programa:
+
+    // fatorial e fibonacci
+    fn fatorial(n) {
+        if n <= 1 {
+            return 1;
+        }
+        return n * fatorial(n - 1);
+    }
+
+    fn fib(n) {
+        let a = 0;
+        let b = 1;
+        let i = 0;
+        while i < n {
+            let tmp = a + b;
+            a = b;
+            b = tmp;
+            i = i + 1;
+        }
+        return a;
+    }
+
+    let nome = "Mini";
+    print("Olá, " + nome + "!");
+    print(fatorial(5));
+    print(fib(10));
+    print(10 / 3, 10 % 3, -2 + 3 * 4);
+    print(1 < 2 and not false);
+    print(fn_sem_retorno());
+
+    fn fn_sem_retorno() {
+        let x = 1;
+    }
+
+Saída esperada:
+
+    Olá, Mini!
+    120
+    55
+    3 1 10
+    true
+    nil
+
+Desafio extra (opcional):
+- REPL: se o programa for executado sem arquivo, abra um modo interativo (prompt "mini> ")
+  que executa uma linha por vez e mantém as variáveis entre as linhas.
+- Listas: [1, 2, 3], acesso por índice lista[0], atribuição lista[0] = 5 e a função
+  embutida len(lista). Acessar um índice fora da lista é erro de execução.
+- Laço for: for i in 0..10 { ... }  (de 0 até 9).
+- Escreva testes (cargo test) separados para o lexer, o parser e o interpretador, incluindo
+  os casos de erro com linha e coluna.
+- Mostre a AST de um programa com a opção --ast, por exemplo:
+      cargo run -- --ast programa.mini
+      Let(nome = "x", valor = Binário(+, Inteiro(1), Binário(*, Inteiro(2), Inteiro(3))))
