@@ -1,0 +1,12 @@
+Desafio 009 - Aplicativo de celular
+
+Crie um aplicativo de celular que simule de forma animada cada ano de estudo do aluno em cada matéria.
+
+exemplo:
+5° ano
+  - Matemática:
+    - Lição 1: (Estilo trilha do duolingo)
+
+Todas as lições são animadas e viciantes para que o aluno queira assistir o conteúdo do ano inteiro e aprender todas as matérias de forma que criar um palácio mental
+de aprendizado, com aprendizado por reforço.
+

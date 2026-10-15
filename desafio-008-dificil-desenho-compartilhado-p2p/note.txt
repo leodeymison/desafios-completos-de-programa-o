@@ -1,0 +1,246 @@
+Desafio 008 (variação P2P) - Desenho compartilhado sem servidor central
+
+Crie um quadro de desenho colaborativo em tempo real em que não existe servidor central.
+Todo mundo roda o mesmo programa. Quem cria o desenho é também o servidor dele: os
+convidados se conectam direto no computador do criador, que valida as regras e repassa
+cada traço para os outros.
+
+Cada participante guarda uma cópia do desenho no próprio computador. Se o criador fechar
+o programa, o desenho não some para ninguém: só para de ser compartilhado. Quem continuar
+editando edita a SUA cópia, que passa a ser dele.
+
+    cargo run -- --nick ferris --porta 7000 --dados ~/.desenhos-ferris
+    cargo run -- --nick bob    --porta 7001 --dados ~/.desenhos-bob
+
+(Os dois comandos acima permitem testar no mesmo computador: cada instância precisa de
+uma porta e de uma pasta de dados próprias.)
+
+Áreas do Rust que você vai praticar:
+- Um único app que é cliente e servidor ao mesmo tempo (tokio: TcpListener, TcpStream,
+  tokio::spawn, select!)
+- Descoberta na rede local com UDP broadcast (tokio::net::UdpSocket) ou mDNS (mdns-sd)
+- Interface gráfica com uma biblioteca de modo imediato (eframe/egui ou macroquad)
+- Comunicação entre a thread da interface e a thread de rede com canais, sem travar a
+  janela
+- Máquina de estados: o mesmo desenho pode estar Hospedando, Conectado ou Offline
+- Protocolo próprio com enums serializados por serde (JSON, uma mensagem por linha)
+- Persistência local em arquivo (serde_json) com escrita segura (grava num arquivo
+  temporário e renomeia, para não corromper se o programa fechar no meio)
+- Rasterização: transformar a lista de traços numa imagem (tiny-skia ou image) e salvar
+  em PNG, com diálogo de "salvar como" (rfd)
+- Tratamento de erros com tipos próprios e testes de integração
+
+Estrutura do projeto:
+
+    desafio-008-dificil-desenho-compartilhado-p2p/
+    └── src/
+        ├── main.rs          argumentos, sobe a interface e a rede
+        ├── protocolo.rs     Mensagem, Traco, Ferramenta... (serde)
+        ├── sala.rs          regras do desenho: papéis, sequência, desfazer/refazer
+        │                    (sem rede e sem interface: testável sozinho)
+        ├── anfitriao.rs     modo criador: aceita conexões e usa a Sala
+        ├── convidado.rs     modo convidado: conecta no criador e aplica os eventos
+        ├── descoberta.rs    anúncios na rede local (nick, código, endereço)
+        ├── armazenamento.rs leitura e gravação das cópias locais
+        ├── exportar.rs      traços -> PNG
+        └── ui.rs            janela, ferramentas e telas
+
+Estrutura sugerida:
+
+    struct Ponto { x: f32, y: f32 }
+    struct Cor { r: u8, g: u8, b: u8, a: u8 }
+
+    enum Ferramenta { Pincel { cor: Cor, espessura: f32 }, Borracha { espessura: f32 } }
+
+    struct Traco { id: u64, autor: String, ferramenta: Ferramenta, pontos: Vec<Ponto>,
+                   desfeito: bool }
+
+    enum Papel { Criador, Editor, Visualizador }
+
+    // Cópia local, gravada em <dados>/<desenho_id>.json
+    struct Desenho {
+        id: Uuid,
+        titulo: String,
+        dono: String,                 // quem é o dono DESTA cópia
+        criador_original: String,     // quem criou o desenho que deu origem a esta cópia
+        origem: Option<Uuid>,         // id do desenho original, se esta cópia for derivada
+        tracos: Vec<Traco>,
+        participantes: Vec<(String, Papel)>,   // usado só enquanto hospedando
+        modificado_em: u64,
+    }
+
+    enum EstadoDaSessao {
+        Hospedando { codigo: String, conectados: usize },   // sou o criador e estou online
+        Conectado { anfitriao: SocketAddr, papel: Papel },  // estou no desenho de outro
+        Offline,                                            // só a minha cópia local
+    }
+
+    // convidado -> criador
+    enum Pedido {
+        Entrar { nick: String, codigo: Option<String> },   // código ou convite aceito
+        IniciarTraco { ferramenta: Ferramenta, ponto: Ponto },
+        ContinuarTraco { pontos: Vec<Ponto> },
+        FinalizarTraco,
+        Desfazer,
+        Refazer,
+        Sair,
+    }
+
+    // criador -> convidados
+    enum Evento {
+        Estado { desenho: Desenho, seu_papel: Papel },
+        TracoParcial { autor: String, ponto_inicial: u64, pontos: Vec<Ponto> },
+        TracoConcluido { seq: u64, traco: Traco },
+        TracoDesfeito { seq: u64, id: u64 },
+        TracoRefeito { seq: u64, id: u64 },
+        PapelAlterado { nick: String, papel: Papel },
+        Entrou { nick: String, papel: Papel },
+        Saiu { nick: String },
+        Encerrando,                       // o criador vai fechar o compartilhamento
+        Erro { mensagem: String },
+    }
+
+    // anúncios por UDP na rede local
+    enum Anuncio {
+        Presenca { nick: String, porta: u16 },
+        Convite { de: String, para: String, titulo: String, endereco: SocketAddr,
+                  token: String },
+        ProcurarCodigo { codigo: String, responder_para: SocketAddr },
+        CodigoEncontrado { codigo: String, titulo: String, endereco: SocketAddr },
+    }
+
+Arquitetura:
+- Não há servidor central. A topologia é em estrela: o criador é o centro e cada
+  convidado tem uma única conexão TCP com ele. Convidados nunca conversam entre si.
+- Enquanto está hospedando, o computador do criador é a fonte da verdade: ele dá o número
+  de sequência de cada evento, valida permissões e repassa para todos na mesma ordem.
+- Os traços do próprio criador passam pela mesma Sala que os pedidos dos convidados (sem
+  atalho), para que a ordem seja a mesma em todas as telas.
+- A interface roda na thread principal. Servidor (quando hospedando), conexão com o
+  anfitrião (quando convidado) e descoberta rodam em tarefas tokio e falam com a
+  interface por canais.
+
+Como entrar num desenho:
+- Pelo código de 12 caracteres: gerado quando o criador começa a compartilhar. Sem
+  caracteres ambíguos (sem 0/O, 1/l/I), exibido em grupos de 4 (K7WQ-MP3X-9TRA); hífens e
+  maiúsculas/minúsculas são ignorados ao digitar.
+  - Na rede local: o convidado digita só o código. O programa envia ProcurarCodigo por
+    broadcast e o criador responde com o endereço.
+  - Fora da rede local: o convidado digita endereço e código (203.0.113.7:7000/K7WQMP3X9TRA).
+  - Quem entra pelo código entra como Visualizador.
+- Por convite ao nick: cada instância anuncia Presenca { nick } na rede local de tempos
+  em tempos. O criador vê a lista de nicks online e envia um Convite. O convidado vê uma
+  notificação "ferris convidou você para Arquitetura" e pode aceitar ou recusar. O convite
+  leva um token de uso único que substitui o código. Quem entra por convite também começa
+  como Visualizador.
+- Sem servidor central não existe convite para quem está offline: se o nick não estiver
+  na lista de presença, o convite não pode ser enviado (mostre isso na interface).
+- Um código ou token inválido retorna Erro e a conexão é fechada.
+
+Papéis:
+- Criador: quem está hospedando. Desenha, convida, promove e revoga.
+- Editor: pode desenhar. No máximo 5 editores conectados (além do criador).
+- Visualizador: só assiste. Sem limite de quantidade.
+- Somente o criador promove (Visualizador -> Editor) e revoga (Editor -> Visualizador).
+  Vale na hora: o traço em andamento de quem perdeu a permissão é descartado para todos.
+- O criador valida tudo. Um convidado modificado que envie IniciarTraco sem permissão
+  recebe Erro, mesmo que a interface dele não tenha bloqueado.
+
+Cópias locais e o que acontece quando alguém sai:
+- Todo participante (inclusive visualizadores) grava o desenho na própria pasta de dados
+  enquanto recebe os eventos. Assim, cada um tem sempre uma cópia completa e atualizada.
+- Quando o criador fecha o programa (ou clica em "parar de compartilhar"):
+  1. Ele envia Encerrando para todos. Se cair sem avisar, os convidados detectam pela
+     conexão fechada ou por falta de resposta (heartbeat a cada 2 s, timeout de 6 s).
+  2. Para os convidados o desenho continua aberto e visível, mas o estado passa para
+     Offline e a interface mostra "o compartilhamento foi encerrado, você está editando
+     a sua cópia".
+  3. Traços parciais que ainda não tinham sido concluídos são descartados.
+  4. A cópia de cada convidado vira dele: dono = nick do convidado, origem = id do
+     desenho original e criador_original = nick do criador. A partir daí, QUALQUER pessoa
+     (inclusive quem era Visualizador) pode desenhar nela, porque é dona da cópia.
+  5. O que cada um editar fica só no próprio computador. Nada é enviado de volta ao
+     criador, nem quando ele voltar a ficar online.
+- Como a cópia é dele, o antigo convidado pode clicar em "compartilhar" e passar a
+  hospedar a sua versão, como criador, com um código novo.
+- Se o criador original voltar a compartilhar, quem se conectar de novo recebe a versão
+  dele como um desenho separado. A cópia local de quem continuou editando não é
+  sobrescrita (a lista mostra as duas, com a origem de cada uma).
+- Quando um convidado sai, a cópia dele continua salva no computador dele e o desenho
+  segue normalmente para os outros.
+
+Ferramentas de desenho:
+- Pincel com cor (paleta + seletor livre) e espessura (de 1 a 50 px).
+- Borracha com espessura: é um traço que apaga o que está embaixo. Também pode ser desfeita.
+- Desfazer (Ctrl+Z) e refazer (Ctrl+Shift+Z): cada usuário desfaz e refaz apenas os
+  PRÓPRIOS traços. Desenhar um traço novo limpa a pilha de refazer daquele usuário.
+  Desfazer só marca o traço como desfeito (fica salvo na cópia local).
+- Depois que a cópia vira sua (estado Offline), você pode desfazer seus próprios traços,
+  mas não os de outras pessoas que vieram da sessão compartilhada.
+- Tempo real: enquanto o traço está sendo desenhado, os pontos são enviados em lotes
+  (~30 ms). Os outros veem o traço "crescendo", não só quando o mouse é solto.
+
+Baixar a imagem:
+- Botão "Baixar imagem" (e Ctrl+S) disponível para qualquer participante, em qualquer
+  estado (Hospedando, Conectado ou Offline), inclusive para Visualizadores.
+- Abre um diálogo "salvar como" com nome sugerido "<titulo>-<data>.png".
+- Opções: resolução (1x, 2x, 4x do tamanho do quadro, ou largura em pixels) e fundo
+  (branco ou transparente). Com fundo transparente, a borracha deve deixar transparência
+  de verdade, não pintar de branco.
+- A imagem é gerada a partir da lista de traços (ignorando os desfeitos e os parciais),
+  não de um print da janela: deve sair igual em qualquer resolução escolhida.
+- A exportação roda fora da thread da interface (com indicador de progresso) e erros de
+  escrita (pasta sem permissão, disco cheio) aparecem como mensagem, sem fechar o programa.
+
+Regras:
+- Quem entra com o desenho em andamento recebe o Estado completo e depois os eventos ao
+  vivo, sem perder nem duplicar nenhum traço que tenha acontecido no meio da entrada.
+- Um convidado lento ou que desconecta não pode atrasar os outros nem a tela do criador.
+- O programa nunca pode perder a cópia local: gravação atômica (arquivo temporário +
+  rename) e, se o arquivo estiver corrompido ao abrir, avisar em vez de apagar.
+- Coordenadas são relativas ao tamanho do quadro (0.0 a 1.0), para que janelas de
+  tamanhos diferentes mostrem o mesmo desenho.
+- A interface mostra: título, estado da sessão (Hospedando / Conectado a ferris /
+  Offline), código (com botão copiar, só para o criador), participantes com o papel de
+  cada um e a lista "meus desenhos" com dono e origem de cada cópia.
+- Mensagens inválidas retornam Erro sem derrubar a conexão nem o programa.
+- Logue no terminal cada conexão, convite, mudança de papel e mudança de estado.
+
+Exemplo de uso:
+
+    ferris cria "Arquitetura" e compartilha     -> Hospedando, código K7WQ-MP3X-9TRA
+    bob digita K7WQMP3X9TRA (mesma rede)        -> encontrado por broadcast, entra como
+                                                   Visualizador e recebe o desenho
+    ferris vê "corro" online e o convida        -> corro aceita e entra como Visualizador
+    ferris promove bob a Editor                 -> bob desenha, todos veem em tempo real
+    corro clica em "Baixar imagem" (2x, fundo   -> arquitetura-2026-10-14.png salvo
+      transparente)
+    ferris fecha o programa                     -> bob e corro ficam Offline, desenho
+                                                   continua aberto para os dois
+    bob desenha mais uma seta                   -> só na cópia do bob
+    corro (que era Visualizador) desenha        -> pode: a cópia agora é dele
+    bob clica em "compartilhar"                 -> bob passa a hospedar a versão dele,
+                                                   com um código novo
+    ferris abre o programa de novo              -> vê a versão dele, sem a seta do bob
+
+Testes esperados:
+- Unitários: código de 12 caracteres, regras da Sala (limite de 5 editores, só o criador
+  altera papéis, desfazer/refazer por usuário), transição de cópia para "dono local",
+  ida e volta do arquivo local (gravar e ler dá o mesmo Desenho).
+- Exportação: um desenho conhecido gera um PNG com pixels esperados em pontos específicos,
+  e o mesmo desenho em 1x e 2x tem as mesmas proporções.
+- Integração (tests/): sobe um criador numa porta aleatória com pasta de dados temporária,
+  conecta dois convidados sem interface, desenha, derruba o criador e verifica que os
+  dois convidados ficam com cópias iguais, Offline, e que editar uma não altera a outra.
+
+Desafio extra (opcional):
+- Mesclar versões: quando o criador volta, oferecer a quem editou offline a opção de
+  enviar seus traços novos (o criador aceita ou recusa). Pense em como identificar traços
+  de forma única sem servidor (ids com nick + contador, ou UUID).
+- Migração de anfitrião: se o criador cair, o editor mais antigo assume automaticamente
+  como novo anfitrião e os outros se reconectam nele, sem ninguém ficar Offline.
+- Malha completa (mesh) com CRDT: todos conectados com todos, sem anfitrião, e as cópias
+  convergem para o mesmo resultado mesmo com edições simultâneas offline.
+- Atravessar NAT (hole punching por UDP) para conectar fora da rede local sem abrir portas.
+- Criptografia de ponta a ponta derivada do código (o código vira a senha da sessão).
+- Exportar também em SVG (vetorial) e importar uma imagem de fundo.

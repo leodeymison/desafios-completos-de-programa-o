@@ -1,0 +1,188 @@
+Desafio 008 - Desenho compartilhado
+
+Crie um quadro de desenho colaborativo em tempo real, dividido em dois apps independentes:
+
+1. frontend: app gráfico onde o usuário desenha. Ele só cuida da tela: captura o mouse e
+   o teclado, envia eventos para a API e desenha o que a API mandar de volta. Não tem
+   banco de dados nem regra de negócio (permissões, limites, desfazer, etc.).
+2. api-socket: API de socket, sem interface gráfica. Recebe os eventos de todos os
+   frontends conectados, valida as regras, grava no banco de dados e repassa para os
+   outros participantes do mesmo desenho.
+
+O criador do desenho pode convidar outras pessoas para assistir e, se ele permitir, para
+desenhar junto, cada um pela sua própria tela (cada pessoa roda o seu frontend).
+
+    cd api-socket && cargo run -- --porta 7000 --banco desenhos.db
+    cd frontend   && cargo run -- --api localhost:7000 --nick ferris
+
+Estrutura do projeto (workspace Cargo com dois apps e uma biblioteca compartilhada):
+
+    desafio-008-dificil-desenho-compartilhado/
+    ├── Cargo.toml          [workspace] members = ["protocolo", "api-socket", "frontend"]
+    ├── protocolo/          lib: tipos das mensagens (Pedido, Evento, Traco...) + serde
+    ├── api-socket/         bin: servidor tokio + SQLite. Depende de protocolo.
+    └── frontend/           bin: janela gráfica + cliente de socket. Depende de protocolo.
+
+- Os dois apps só compartilham o crate protocolo. O frontend não pode depender de nada da
+  api-socket (nem do banco), e a api-socket não pode depender de biblioteca gráfica.
+- Os apps são executados e testados separadamente. Deve ser possível subir uma api-socket
+  e conectar vários frontends, em máquinas diferentes.
+
+Áreas do Rust que você vai praticar:
+- Workspace Cargo com vários crates e uma biblioteca compartilhada entre apps
+- api-socket: programação assíncrona com tokio (TcpListener, tokio::spawn, select!) ou
+  WebSocket com tokio-tungstenite
+- api-socket: estado compartilhado com Arc, Mutex/RwLock e tokio::sync::broadcast por sala
+- api-socket: banco de dados com SQLite (rusqlite ou sqlx) e migrações simples
+- frontend: interface gráfica com uma biblioteca de modo imediato (eframe/egui ou macroquad)
+- frontend: comunicação entre a thread da interface e a thread de rede com canais
+  (std::sync::mpsc ou tokio::sync::mpsc) sem travar a janela
+- protocolo: enums serializados por serde (JSON, uma mensagem por linha)
+- Tratamento de erros com tipos próprios e testes de integração
+
+Estrutura sugerida (crate protocolo):
+
+    struct Ponto { x: f32, y: f32 }
+    struct Cor { r: u8, g: u8, b: u8, a: u8 }
+
+    enum Ferramenta { Pincel { cor: Cor, espessura: f32 }, Borracha { espessura: f32 } }
+
+    struct Traco { id: u64, autor: String, ferramenta: Ferramenta, pontos: Vec<Ponto> }
+
+    enum Papel { Criador, Editor, Visualizador }
+
+    // frontend -> api-socket
+    enum Pedido {
+        Entrar { nick: String },
+        CriarDesenho { titulo: String },
+        AbrirPorCodigo { codigo: String },
+        AbrirDesenho { desenho_id: u64 },          // desenho para o qual foi convidado
+        Convidar { nick: String },
+        AlterarPapel { nick: String, papel: Papel },
+        IniciarTraco { ferramenta: Ferramenta, ponto: Ponto },
+        ContinuarTraco { pontos: Vec<Ponto> },
+        FinalizarTraco,
+        Desfazer,
+        Refazer,
+        Sair,
+    }
+
+    // api-socket -> frontend
+    enum Evento {
+        Estado { desenho: DesenhoInfo, tracos: Vec<Traco>, participantes: Vec<(String, Papel)> },
+        TracoParcial { autor: String, ponto_inicial: u64, pontos: Vec<Ponto> },
+        TracoConcluido { traco: Traco },
+        TracoRemovido { id: u64 },
+        TracoRestaurado { traco: Traco },
+        ConviteRecebido { desenho_id: u64, titulo: String, de: String },
+        PapelAlterado { nick: String, papel: Papel },
+        Entrou { nick: String, papel: Papel },
+        Saiu { nick: String },
+        Erro { mensagem: String },
+    }
+
+Arquitetura:
+- A api-socket é central e é a única fonte da verdade. Os frontends nunca conversam entre
+  si: todo evento passa pela API.
+- O frontend não decide nada sozinho. Ele pode desabilitar botões para dar feedback (ex.:
+  visualizador com ferramentas bloqueadas), mas quem valida é sempre a API. Um frontend
+  modificado que envie IniciarTraco sem permissão deve receber Erro.
+- Cada desenho aberto é uma "sala" na API. Todo evento da sala recebe um número de
+  sequência dado pela API e é entregue a todos os participantes nessa mesma ordem.
+  Dois editores desenhando ao mesmo tempo precisam ver exatamente o mesmo resultado.
+- O frontend roda a interface na thread principal e a conexão de socket em outra thread
+  (runtime tokio). As duas conversam por canais. A janela nunca pode congelar esperando a
+  rede, e se a API cair o frontend mostra "desconectado" e tenta reconectar.
+
+Acesso e papéis:
+- Usuário é identificado pelo nick, único na api-socket (guardado no banco).
+- Criador: quem criou o desenho. Desenha, convida, promove e revoga permissões. Só existe
+  um por desenho e o papel dele não pode ser alterado.
+- Editor: pode desenhar. No máximo 5 editores por desenho (além do criador).
+- Visualizador: só assiste. Sem limite de quantidade.
+- O convidado pode acessar o desenho de duas formas:
+  1. Código de 12 caracteres: gerado na criação do desenho, alfanumérico, sem caracteres
+     ambíguos (sem 0/O, 1/l/I). Pode ser exibido em grupos de 4 (K7WQ-MP3X-9TRA), mas
+     hífens e maiúsculas/minúsculas são ignorados ao digitar. Quem entra pelo código entra
+     como Visualizador.
+  2. Convite pelo nick: o criador envia Convidar { nick }. Se o convidado estiver online,
+     recebe ConviteRecebido na hora. Se estiver offline, o convite fica salvo e aparece
+     na próxima vez que ele entrar. Quem entra pelo convite também começa como Visualizador.
+- Somente o criador pode promover um Visualizador a Editor ou revogar (Editor ->
+  Visualizador). A mudança vale imediatamente: um traço em andamento de quem perdeu a
+  permissão é descartado para todos.
+- Promover um sexto editor retorna erro: (erro) limite de 5 editores atingido.
+- Quem já teve acesso (por código ou convite) fica registrado e pode reabrir o desenho
+  depois, pela lista de "meus desenhos", sem precisar do código de novo.
+
+Ferramentas de desenho:
+- Pincel com cor (paleta + seletor livre) e espessura (de 1 a 50 px).
+- Borracha com espessura. A borracha é um traço que apaga o que está embaixo (pinte com
+  a cor do fundo ou use o modo de mistura de recorte). Ela também pode ser desfeita.
+- Desfazer (Ctrl+Z) e refazer (Ctrl+Shift+Z): cada usuário desfaz e refaz apenas os
+  PRÓPRIOS traços, na ordem inversa em que os fez. Desfazer nunca apaga o traço de outra
+  pessoa. Desenhar um traço novo limpa a pilha de refazer daquele usuário.
+- Tempo real: enquanto o traço está sendo desenhado, os pontos são enviados em lotes
+  (ContinuarTraco a cada ~30 ms ou a cada N pontos). Os outros veem o traço "crescendo",
+  não só quando o mouse é solto.
+
+Persistência:
+- Desenhos, traços, participantes, papéis e convites ficam no SQLite.
+- Um traço só é gravado quando é finalizado. Traço parcial de um frontend que caiu é
+  descartado e os outros recebem TracoRemovido.
+- Desfazer não apaga do banco: marca o traço como desfeito (para o refazer funcionar
+  mesmo depois de reiniciar a api-socket).
+- Se o criador se desconecta, o desenho continua disponível: editores continuam
+  desenhando e visualizadores continuam assistindo. A sala só sai da memória quando o
+  último participante sai, e é recarregada do banco quando alguém abrir de novo.
+- Reiniciar a api-socket não perde nada que já tenha sido finalizado.
+
+Regras:
+- Quem entra numa sala com o desenho em andamento recebe o Estado completo (todos os
+  traços ativos, na ordem) e depois passa a receber os eventos ao vivo, sem perder nem
+  duplicar nenhum traço que tenha acontecido no meio da entrada.
+- Visualizador que tenta desenhar recebe (erro) sem permissão para desenhar, e o frontend
+  já deve impedir isso na interface (cursor bloqueado, ferramentas desabilitadas).
+- Mensagem inválida, nick repetido ou código inexistente retornam Erro sem derrubar a
+  conexão nem a api-socket.
+- Um frontend lento ou que desconecta não pode atrasar os outros (use broadcast e trate
+  o erro Lagged reenviando o Estado para quem ficou para trás).
+- Coordenadas são relativas ao tamanho do quadro (0.0 a 1.0), para que janelas de
+  tamanhos diferentes mostrem o mesmo desenho.
+- A interface mostra: título, código do desenho (com botão copiar, só para o criador),
+  lista de participantes com o papel de cada um, e quem está desenhando no momento
+  (o traço parcial pode mostrar o nick perto do cursor do autor).
+- Logue na api-socket cada conexão, entrada/saída de sala, convite e mudança de papel.
+
+Exemplo de uso:
+
+    ferris (criador) cria "Arquitetura"         -> código: K7WQ-MP3X-9TRA
+    ferris convida o nick "corro"                -> corro está offline, convite salvo
+    bob abre pelo código K7WQMP3X9TRA            -> entra como Visualizador, vê o desenho
+    ferris desenha um círculo azul               -> bob vê o traço crescendo em tempo real
+    bob tenta desenhar                           -> (erro) sem permissão para desenhar
+    ferris promove bob a Editor                  -> bob agora pode desenhar
+    bob desenha uma linha vermelha e dá Ctrl+Z   -> só a linha do bob some
+    corro entra na api-socket                    -> recebe o convite de ferris e abre
+    ferris fecha o frontend                      -> bob continua desenhando, corro assiste
+    ferris volta e revoga bob                    -> bob vira Visualizador na hora
+    api-socket reinicia                          -> desenho reaberto exatamente igual
+
+Testes esperados:
+- Unitários: geração e validação do código de 12 caracteres, regras de papel (limite de
+  5 editores, só o criador altera papéis), pilhas de desfazer/refazer por usuário.
+- Integração (tests/): sobe a api-socket numa porta aleatória com banco em memória,
+  conecta três frontends "falsos" (sem interface, usando só o crate protocolo) e verifica
+  que todos recebem os mesmos eventos na mesma ordem, que o visualizador não consegue
+  desenhar e que o estado sobrevive à reinicialização.
+
+Desafio extra (opcional):
+- Exportar o desenho para PNG (crate image) e importar uma imagem de fundo.
+- Mais ferramentas: retângulo, elipse, linha reta, texto e balde de tinta.
+- Cursores ao vivo de todos os participantes, mesmo quando não estão desenhando.
+- Zoom e arrastar o quadro (pan) com coordenadas de mundo infinitas.
+- Histórico: uma linha do tempo que reproduz o desenho traço a traço.
+- Senha no login (hash com argon2) e sessão por token.
+- Compressão dos pontos (simplificação de Ramer-Douglas-Peucker) antes de enviar e gravar.
+- Um segundo frontend web com WebSocket e canvas, falando o mesmo protocolo do frontend
+  nativo, sem mudar nada na api-socket.
